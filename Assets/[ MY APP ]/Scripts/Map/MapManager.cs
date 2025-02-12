@@ -10,6 +10,8 @@ using System.Collections.Generic;
 using System.Linq;
 using ExitGames.Client.Photon.StructWrapping;
 using System.Collections;
+using System.Globalization;
+using UnityEngine.UIElements;
 
 public class MapManager : MonoBehaviour
 {
@@ -119,6 +121,54 @@ public class MapManager : MonoBehaviour
 
     }
 
+    IEnumerator AdjustBackgroundSize(GameObject markerObj, TextMeshProUGUI titleText, RectTransform bgRect, float horizontalPadding, float verticalPadding)
+    {
+        // Wait until we get valid text dimensions
+        int maxAttempts = 20;  // Increased from 10 to give more chances
+        int attempts = 0;
+        
+        // Initial delay to let the text component initialize
+        yield return new WaitForSeconds(0.1f);
+        
+        while (attempts < maxAttempts)
+        {
+            // Force layout and text updates
+            titleText.ForceMeshUpdate();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(titleText.rectTransform);
+            
+            float textWidth = titleText.preferredWidth;
+            float textHeight = titleText.preferredHeight;
+            
+            // Log every attempt for debugging
+            Debug.Log($"Attempt {attempts + 1} for {markerObj.name}: Width={textWidth}, Height={textHeight}");
+            
+            // Check if we have valid dimensions
+            if (textWidth > 0 && textHeight > 0)
+            {
+                Vector2 preferredSize = new Vector2(textWidth, textHeight);
+                Vector2 newSize = new Vector2(preferredSize.x + horizontalPadding, preferredSize.y + verticalPadding);
+                bgRect.sizeDelta = newSize;
+                
+                // Verify the size was actually set
+                if (Mathf.Approximately(bgRect.sizeDelta.x, newSize.x) && 
+                    Mathf.Approximately(bgRect.sizeDelta.y, newSize.y))
+                {
+                    Debug.Log($"Successfully sized marker '{markerObj.name}' to {bgRect.sizeDelta}");
+                    yield break;
+                }
+            }
+            
+            attempts++;
+            yield return new WaitForSeconds(0.05f); // Wait a bit longer between attempts
+        }
+        
+        // If we get here, we failed to get valid dimensions
+        Debug.LogError($"Failed to size marker after {maxAttempts} attempts: {markerObj.name}, " +
+                      $"Text: '{titleText.text}', " +
+                      $"Final dimensions: {titleText.preferredWidth}x{titleText.preferredHeight}, " +
+                      $"Background size: {bgRect.sizeDelta}");
+    }
+
     // Use Regex to extract Longitude and Latitude from the description
     private void ExtractCoordinate(string description, FileInfo fileInfo)
     {
@@ -132,8 +182,8 @@ public class MapManager : MonoBehaviour
 
         if (longitudeMatch.Success && latitudeMatch.Success)
         {
-            if (float.TryParse(longitudeMatch.Groups[1].Value, out float longitude) &&
-                float.TryParse(latitudeMatch.Groups[1].Value, out float latitude))
+            if (float.TryParse(longitudeMatch.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float longitude) &&
+                float.TryParse(latitudeMatch.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float latitude))
             {
                 // Add position debugging
                 Debug.Log($"Creating marker at Lat: {latitude}, Lng: {longitude}");
@@ -142,7 +192,16 @@ public class MapManager : MonoBehaviour
                 GameObject markerObj = Instantiate(m_markerPrefab, m_markerContent);
                 markerObj.name = "Marker_" + videoName;
 
-                markerObj.GetComponentInChildren<TextMeshProUGUI>().text = System.IO.Path.GetFileNameWithoutExtension(videoName);
+                TextMeshProUGUI titleText = markerObj.GetComponentInChildren<TextMeshProUGUI>();
+                titleText.text = System.IO.Path.GetFileNameWithoutExtension(videoName);
+
+                // Find your background
+                RectTransform bgRect = markerObj.transform.Find("Background").GetComponent<RectTransform>();
+                float horizontalPadding = 20f;
+                float verticalPadding = 10f;
+
+                // Start the coroutine to adjust the background size
+                StartCoroutine(AdjustBackgroundSize(markerObj, titleText, bgRect, horizontalPadding, verticalPadding));
 
                 // Create an OnlineMapsMarker
                 OnlineMapsMarker onlineMarker = OnlineMapsMarkerManager.CreateItem(longitude, latitude);
